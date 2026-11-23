@@ -594,21 +594,72 @@ class LLMAnalyzer:
             keywords=keywords,
         )
 
-        # 正向条件：必须有正当理由才能回复
+        # 正向条件：必须有正当理由才能回复，再按「主动程度」折算分数门槛
         if decision.should_reply and self.config_manager:
             cm = self.config_manager.for_chat(chat_id) if chat_id else None
+            even_not_questioned = bool(cm.reply_even_not_questioned if cm else False)
             has_reason = (
                 decision.is_questioned
                 or decision.is_interesting
-                or bool(cm.reply_even_not_questioned if cm else False)
+                or even_not_questioned
             )
-            if not has_reason:
-                logger.info(
-                    "AngelHeart分析器: should_reply=true 但无正当理由（非提问、非兴趣、未开启无视条件），设为不回复"
+            initiative = int(getattr(cm, "initiative", 50)) if cm else 50
+            if initiative == 50:
+                # 默认档：保持原有行为，必须有正当理由
+                if not has_reason:
+                    logger.info(
+                        "AngelHeart分析器: should_reply=true 但无正当理由（非提问、非兴趣、未开启无视条件），设为不回复"
+                    )
+                    decision.should_reply = False
+                    decision.reply_strategy = "继续观察"
+            else:
+                # 其他档：完全交给分数门槛，理由只作为加分项
+                decision = self._apply_initiative(
+                    decision, initiative, even_not_questioned, chat_id
                 )
-                decision.should_reply = False
-                decision.reply_strategy = "继续观察"
 
+        return decision
+
+    @staticmethod
+    def _initiative_score(decision, even_not_questioned: bool) -> int:
+        """把判定信号折算成分数。
+
+        被追问 70、觉得有趣 60、模型总体倾向 50、允许无视条件 50，
+        全部满足为 230。
+        """
+        score = 0
+        if decision.is_questioned:
+            score += 70
+        if decision.is_interesting:
+            score += 60
+        if decision.should_reply:
+            score += 50
+        if even_not_questioned:
+            score += 50
+        return score
+
+    def _apply_initiative(
+        self, decision, initiative: int, even_not_questioned: bool, chat_id: str
+    ):
+        """主动程度 1-100 换算成通过门槛。
+
+        门槛 = 160 - 主动程度 × 1.2：
+          1   -> 158.8（几乎只有全部信号满足才回复）
+          50  -> 100  （等价于原有逻辑，故 50 不进入本函数）
+          100 -> 40   （只要模型想回复就放行）
+        """
+        threshold = 160.0 - initiative * 1.2
+        score = self._initiative_score(decision, even_not_questioned)
+        if score < threshold:
+            logger.debug(
+                f"AngelHeart[{chat_id}]: 主动程度 {initiative}，分数 {score} < 门槛 {threshold:.1f}，转为观察"
+            )
+            decision.should_reply = False
+            decision.reply_strategy = "继续观察"
+        else:
+            logger.debug(
+                f"AngelHeart[{chat_id}]: 主动程度 {initiative}，分数 {score} >= 门槛 {threshold:.1f}，放行"
+            )
         return decision
 
     def _format_conversation_history(self, conversations: List[Dict], chat_id: str = "") -> str:

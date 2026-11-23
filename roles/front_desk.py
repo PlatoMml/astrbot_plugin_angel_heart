@@ -2108,6 +2108,8 @@ class FrontDesk:
         chat_config = self.config_manager.for_chat(chat_id)
         if not chat_config.group_chat_enhancement:
             return False
+        if not getattr(chat_config, "quote_target_enabled", False):
+            return False
         if not self._quote_target_platform_supported(event):
             return False
         provider_settings = self._host_settings(chat_id, "provider_settings")

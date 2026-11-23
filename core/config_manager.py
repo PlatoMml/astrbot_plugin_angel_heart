@@ -234,6 +234,20 @@ class ConfigManager:
         return self._get_grouped("wake_interaction", "reply_even_not_questioned", True)
 
     @property
+    def quote_target_enabled(self) -> bool:
+        """是否启用 [#n] 引用编号（默认关闭）。"""
+        return bool(self._get_grouped("wake_interaction", "quote_target_enabled", False))
+
+    @property
+    def initiative(self) -> int:
+        """主动程度 1-100，默认 50；50 表示维持原有判定行为。"""
+        try:
+            value = int(self._get_grouped("wake_interaction", "initiative", 50))
+        except (TypeError, ValueError):
+            value = 50
+        return max(1, min(100, value))
+
+    @property
     def block_unapproved_wake_non_command(self) -> bool:
         return self._get_grouped(
             "wake_interaction", "block_unapproved_wake_non_command", False

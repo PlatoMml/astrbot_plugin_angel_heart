@@ -12,6 +12,7 @@ import asyncio
 import time
 import json
 import os
+import re
 from typing import Any
 
 from astrbot.api.star import Star, Context, register
@@ -541,14 +542,21 @@ class AngelHeartPlugin(Star):
                 )
                 return
 
-            # 2. 引用目标：解析标记、按间隔判断是否插入 Reply
+            # 2. 引用目标：开启时才解析标记并插入 Reply；关闭时交给下方清洗直接删除。
             # 顺序固定在 Markdown 清洗与字数扣能之前，标记不会计入回复字数。
+            if self.config_manager.quote_target_enabled:
+                try:
+                    self._apply_quote_target(event, chat_id, message_chain)
+                except Exception as e:
+                    logger.warning(
+                        f"AngelHeart[{chat_id}]: 引用目标处理失败，继续原有输出清理: {e}"
+                    )
+
+            # 2.5 清除正文中残留的引用编号与消息 ID 元数据
             try:
-                self._apply_quote_target(event, chat_id, message_chain)
+                self._strip_leaked_quote_markers(chat_id, message_chain)
             except Exception as e:
-                logger.warning(
-                    f"AngelHeart[{chat_id}]: 引用目标处理失败，继续原有输出清理: {e}"
-                )
+                logger.warning(f"AngelHeart[{chat_id}]: 清除残留引用标记失败: {e}")
 
             # 3. 遍历消息链中的每个元素，进行 Markdown 清洗
             # 只处理 Plain 文本组件，保持其他组件不变
@@ -611,6 +619,31 @@ class AngelHeartPlugin(Star):
             # 不重新抛出异常，避免影响消息发送流程
 
     # --- 引用目标 ---
+
+    _LEAKED_QUOTE_RE = re.compile(r"\[\s*#\s*\d+\s*\]")
+    _LEAKED_META_RE = re.compile(r"\[\s*本消息(?:引用的目标消息)?\s*ID\s*:[^\]]*\]")
+
+    def _strip_leaked_quote_markers(self, chat_id: str, message_chain) -> None:
+        """删除正文中残留的 [#n] 与 [本消息 ID: ...]。
+
+        开头的引用标记由 _apply_quote_target 负责转成 Reply；
+        这里兜底清理模型写在正文中段、或本不该出现的元数据。
+        """
+        for i, component in enumerate(message_chain):
+            if not isinstance(component, Plain):
+                continue
+            text = component.text
+            if not text:
+                continue
+            cleaned = self._LEAKED_QUOTE_RE.sub("", text)
+            cleaned = self._LEAKED_META_RE.sub("", cleaned)
+            cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+            cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+            if cleaned != text:
+                message_chain[i] = Plain(text=cleaned)
+                logger.info(
+                    f"AngelHeart[{chat_id}]: 已清除正文残留标记"
+                )
 
     def _apply_quote_target(
         self, event: AstrMessageEvent, chat_id: str, message_chain

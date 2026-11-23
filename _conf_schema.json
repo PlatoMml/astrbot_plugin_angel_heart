@@ -189,6 +189,18 @@
     "description": "[点名与交互] 点名词与静默控制",
     "hint": "控制前台如何识别点名、助理昵称如何匹配，以及闭嘴/张嘴静默行为。",
     "items": {
+      "quote_target_enabled": {
+        "type": "bool",
+        "description": "启用引用编号",
+        "hint": "开启后群聊消息会被编号（[#n]），模型可用 [#n] 引用某条消息。关闭后不编号、不注入引用指令，正文里残留的编号会在发送前清除。默认关闭。",
+        "default": false
+      },
+      "initiative": {
+        "type": "int",
+        "description": "主动程度（1-100）",
+        "hint": "默认 50 表示维持原有判断；数值越高越愿意主动参与话题，越低越倾向只回应明确点名。",
+        "default": 50
+      },
       "enter_on_mention_only": {
         "type": "bool",
         "description": "仅点名入场",
